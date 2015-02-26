@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml"  dir="ltr">
+<head>
+  <title>aacam</title>
+  <style>
+#ASCIIcam {
+    line-height: 130%;
+    font-family: monospace;
+    resize: none;
+    margin: 0 auto;
+    padding: 0;
+    overflow: hidden;
+    display: block;
+}
+.controls {
+    padding-top: .5em;
+    font-family: 'Myriad Pro', 'Trebuchet MS', 'PT Sans', 'Verdana', 'Helvetica', 'Verdana', 'Arial', sans-serif;
+    text-align: center;
+    color: #fff;
+}
+body {
+    background-color: #333;
+}
+  </style>
+</head>
+<body>
+  <script src='https://code.jquery.com/jquery-2.1.3.min.js'></script>
+  <video id="preview" width="480" height="320" style='display:none;' autoplay></video>
+  <canvas id="buffer" width="480" height="320" style='display:none;'></canvas>
+  <span id='text_metrics' rows=1 cols=1 style='display:none;'>&nbsp;</span>
+  <textarea id='ASCIIcam'></textarea>
+  <div class='controls'>Press space to pause</div>
+  <script>
+$(function(){
+    var video = document.getElementById("preview"),
+        errBack = function(error) {  console.log("Video capture error: ", error);   };
+
+    navigator.getUserMedia = ( navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia);
+    // Kick off webcam streaming
+    if( navigator.getUserMedia ) {
+          navigator.getUserMedia({"video":true}, function(stream) {
+            video.src = window.URL.createObjectURL(stream);
+            video.play();
+        }, function(error) {  console.log("Video capture error: ", error);  });
+    }
+
+    resize_ASCIIcam('ASCIIcam', 160, 50, $(window).width());
+
+    $(document).keyup(function(evt) {  if (evt.keyCode == 32)  video.paused ? video.play() : video.pause();  });
+});
+function resize_ASCIIcam(ac_id, cols, rows, target_width) {
+    var $ASCIIcam = $('#'+ac_id),
+        $text_metrics = $('#text_metrics');
+    $text_metrics.css('font-family', $ASCIIcam.css('font-family'));
+    for(var height=1; height<100; height++) {
+        $text_metrics.css('font-size', height+'px');
+        if ( $text_metrics.width() > (target_width/cols) ) break;
+    }
+    $('#ASCIIcam').css('font-size', 10);
+    $ASCIIcam.attr('cols', cols).attr('rows', rows);
+}
+function css( element, property ) {
+    return window.getComputedStyle( element, null ).getPropertyValue( property );
+}
+var intensity2char = [];
+function compute_weights(element){
+    var buffer = document.getElementById("buffer"),
+        fontsize = css(element, 'font-size'),
+        fontfamily = css(element, 'font-family'),
+        ctx, metrics, max_h = 0, max_w = 0, height,
+        max_weight, min_weight;
+    ctx = buffer.getContext("2d");
+    for(var i=32; i<127; i++) {
+        metrics = ctx.measureText(String.fromCharCode(i))
+        max_w = metrics.width > max_w ? metrics.width : max_w;
+    }
+    ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+    ctx.rect(0, 0, buffer.width, buffer.height);
+    ctx.fill();
+    ctx.font = fontsize + ' '  + fontfamily;
+    var height = 11;
+    var charweights = [];
+    for(var i=32; i<127; i++) {
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.fillText(String.fromCharCode(i), 0, height+1);
+        glyph = ctx.getImageData(0, 0, max_w, height+2);
+        charweight = 0;
+        for(var j=0; j<glyph.data.length; j+=4) {
+            charweight += (glyph.data[j+0] + glyph.data[j+1] + glyph.data[j+2]) / 3;
+        }
+        ctx.fillStyle = 'rgba(255, 255, 255, 1)';
+        ctx.rect(0, 0, max_w, height+2);
+        ctx.fill();
+        letter = String.fromCharCode(i);
+        charweights.push({c:String.fromCharCode(i), w:charweight / (glyph.data.length/4)});
+    }
+    charweights.sort(function(a,b){  if (a['w'] < b['w']){return -1;} else if (a['w'] > b['w']) {return 1;} else { return 0; };});  // why didn't the usual work?
+    max_weight = charweights[charweights.length-1]['w'];
+    min_weight = charweights[0]['w'];
+    var weight_scale = 255/(max_weight-min_weight);
+    for(var i in charweights) {
+        charweights[i]['w'] = (charweights[i]['w'] - min_weight) * weight_scale;
+    }
+    var i=0;
+    while(i<256 && charweights.length > 0) {
+        intensity2char[i] = charweights[0]['c'];
+        while ( charweights.length > 1 && i >= charweights[1]['w'] )
+            charweights.shift();
+        i++;
+    }
+}
+compute_weights(document.getElementById("ASCIIcam"));
+
+function draw_aacam(e){
+    var aacam = document.getElementById("ASCIIcam"),
+        video = document.getElementById("preview"),
+        buffer = document.getElementById("buffer");
+
+    ctx = buffer.getContext("2d");
+    ctx.font = css(aacam, 'font-size') + ' ' + css(aacam, 'font-family')
+    ctx.fillText('test',100,100);
+    ctx.drawImage(video, 0, 0, 480, 320);
+    var xscale = video.width/aacam.cols, yscale = video.height/aacam.rows;
+    frame = ctx.getImageData(0, 0, 480, 320);
+    var text = '';
+    var contrast = 1.5;
+    var brightness = 100;
+    for(var i=0; i<aacam.rows; i++) {
+        for(var j=0; j<aacam.cols; j++) {
+            var x = Math.round(j*xscale), y = Math.round(i*yscale), index = (y*480 + x)*4;
+            var z = Math.round((frame.data[index] + frame.data[index+1] + frame.data[index+2]) / 3);
+            z = Math.round(128 + (z-128) * contrast) + brightness;
+            z = z<0?0:z>255?255:z;
+            text += intensity2char[z];
+        }
+        text += "\n";
+    }
+    document.getElementById("ASCIIcam").value = text;
+}
+
+function animate() {
+    var rAF = window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame;
+    rAF(animate);
+    draw_aacam();
+}
+
+animate()
+  </script>
+</body>
