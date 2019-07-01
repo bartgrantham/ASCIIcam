@@ -35,13 +35,14 @@ $(function(){
     var video = document.getElementById("preview"),
         errBack = function(error) {  console.log("Video capture error: ", error);   };
 
-    navigator.getUserMedia = ( navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia);
     // Kick off webcam streaming
-    if( navigator.getUserMedia ) {
-          navigator.getUserMedia({"video":true}, function(stream) {
-            video.src = window.URL.createObjectURL(stream);
-            video.play();
-        }, function(error) {  console.log("Video capture error: ", error);  });
+    if (navigator.mediaDevices.getUserMedia ) {
+        navigator.mediaDevices.getUserMedia({"video":true}).then(function(mediaStream) {
+            video.srcObject = mediaStream;
+            video.onloadedmetadata = function(e) {
+                video.play();
+            }
+        })
     }
 
     resize_ASCIIcam('ASCIIcam', 160, 50, $(window).width());
